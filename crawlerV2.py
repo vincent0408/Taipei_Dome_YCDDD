@@ -15,6 +15,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--event', type=str, default='23_abc30')
 parser.add_argument('--no_of_tickets', type=int, default=-1)
+parser.add_argument('--start_time', type=str, default=None)   # ISO 8601: '2023-12-07T13:03:00'
 parser.add_argument('--event_priority', type=list, default=[
     ['2023/12/08 (Fri.) 18:30', None, None], 
     # ['2023/12/17 (Sun.) 13:00', None, None],
@@ -198,6 +199,9 @@ def choose_section(driver):
                 if(found_matched_section):
                     break
                 print('Cannot find available sections with keywords', *priority_keyword)
+        if(not found_matched_section):
+            print('y')
+            driver.refresh()
 
 def enter_captcha(driver):
     def guess_captcha(driver, n=[3, 4, 2]):
@@ -284,16 +288,29 @@ def order_summary(driver):
 def main():
     driver = uc.Chrome()
     login_tixcraft(driver)
+    # --------
     # verifying = True
     # while(verifying):
     #     choose_event(driver)
     #     verifying = credit_card_verification(driver)
     choose_event(driver)
+    # --------
     choose_section(driver)
     book_tickets(driver)
     while(True):
-        pass
+        key = input("Enter 'quit' to quit\n")
+        if(key == 'quit'):
+            driver.quit()
+            break
+
 
 if __name__ == '__main__':
-    main()
-
+    if(args.start_time is None):
+        main()
+    else:
+        from apscheduler.schedulers.blocking import BlockingScheduler
+        start_date, start_time = args.start_time.split('T')
+        hour, minute, second = start_time.split(':')
+        scheduler = BlockingScheduler(timezone='Asia/Taipei')
+        scheduler.add_job(main, 'cron', start_date=start_date, hour=hour, minute=minute, second=second)
+        scheduler.start()
