@@ -9,39 +9,46 @@ import cv2
 import numpy as np
 import io
 from PIL import Image
+import time
+import argparse
 
-no_of_tickets = 4
-event = '23_lioneers'
-url = f'https://tixcraft.com/activity/game/{event}'
-event_priority = [
-    ['2024/01/12 (Fri.) 19:00', None, None], 
-    # ['2024/01/14 (Sun.) 18:00', None, None],
+parser = argparse.ArgumentParser()
+parser.add_argument('--event', type=str, default='23_abc30')
+parser.add_argument('--no_of_tickets', type=int, default=-1)
+parser.add_argument('--event_priority', type=list, default=[
+    ['2023/12/08 (Fri.) 18:30', None, None], 
+    # ['2023/12/17 (Sun.) 13:00', None, None],
     # ['2023/12/06 (Wed.) 18:30', None, None],
     # ['2023/12/09 (Sat.) 14:00', None, None],
     # ['2023/12/06 (Wed.) 18:30', None, None],    
-    ]
-event_data_key_priority = [
-    '16398',
-    '16403',
-]
+    ])
+parser.add_argument('--wanted_section_keywords_priority', type=list, default=[
+    # '' for any seat will do
+    ['108'], 
+    ['109'],
+    ['118'], 
+    ['117'], 
+    ['107'],
+    ['119'], 
+    ['113'],
+    ['112'],
+    ['114'],
+    ['110'],  
+    ['116'],
+    ['111'],
+    ['115'],
+    [''], 
+    ])
+parser.add_argument('--unwanted_section_keywords', type=list, default=['外野',])
+args = parser.parse_args()
+url = f'https://tixcraft.com/activity/game/{args.event}'
 buy_tickets_now = ['Find tickets', '立即購票']
-wanted_section_keywords_priority = [
-    ['特', '南', 'B'], 
-    ['心跳', '北I'], 
-    ['獅吼', '西'], 
-    ['1940'],
-    [''],
-    ]
-unwanted_section_keywords = [
-
-]
 
 
-class StartUPTasks:
+class StartUpTasks:
     def __init__(self, driver) -> None:
         self.driver = driver
         print('Selected activity:', driver.find_element(By.CSS_SELECTOR, "h1").text)
-
 
     def adjust_window(self):
         self.driver.set_window_position(2000, 0)
@@ -60,21 +67,19 @@ class StartUPTasks:
         except:
             pass
 
-
-def login_tixcraft():
-    driver = uc.Chrome()
+def login_tixcraft(driver):
     driver.get(url)
-    start_up_tasks = StartUPTasks(driver)
+    start_up_tasks = StartUpTasks(driver)
     with ThreadPoolExecutor() as executor:
         executor.submit(start_up_tasks.close_alert_button)
-        executor.submit(start_up_tasks.add_cookies)
         executor.submit(start_up_tasks.adjust_window)
+        executor.submit(start_up_tasks.add_cookies)
     driver.refresh()
     return driver
 
 
 def choose_event(driver):
-    #-------------------choose events-------------------
+    # -------------------choose events-------------------
     # buy_now_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "li[class='buy'] > a")))
     finished_choosing_events = False
     while(not finished_choosing_events):
@@ -82,10 +87,10 @@ def choose_event(driver):
         #     buy_now_button.click()
         # except Exception as e:
         #     continue
-        for event_datetime, event_name, event_venue in event_priority:
+        for event_datetime, event_name, event_venue in args.event_priority:
             print('Now trying', event_datetime, event_name, event_venue)
             matched_event_idx = None
-            matched_event_status_button = None
+            matched_event_status_td = None
             event_tr_lst = WebDriverWait(driver, 10).until(EC.visibility_of_all_elements_located((By.CSS_SELECTOR, "tbody > tr")))
             if(matched_event_idx is None):
                 for i, tr in enumerate(event_tr_lst):
@@ -99,10 +104,10 @@ def choose_event(driver):
                         venue_match = (event_td[2].text == event_venue)
                     if(datetime_match and name_match and venue_match):
                         matched_event_idx = i
-                        matched_event_status_button = WebDriverWait(event_td[-1], 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button")))
+                        matched_event_status_td = event_td[-1]
                         break
             else:
-                matched_event_status_button = WebDriverWait(event_tr_lst[matched_event_idx], 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "td > button")))
+                matched_event_status_td = WebDriverWait(event_tr_lst[matched_event_idx], 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "td")))
             if(matched_event_idx is None):
                 print('No matched events, should abort')
                 driver.refresh()
@@ -110,18 +115,19 @@ def choose_event(driver):
                 # print('No matched events, randomly choosing now')
                 # tbd
             else:
-                current_status = matched_event_status_button.text
+                current_status = matched_event_status_td.text
                 if(current_status.find('Sale ended on') != -1):
                     continue
                 elif(current_status.find('Sale starts at') != -1):
-                    print('Sale has not yet started, refreshing...')
+                    print(current_status, ', refreshing...', sep='')
+                    time.sleep(.5)
                     driver.refresh()
                     break
-                if(matched_event_status_button.text in buy_tickets_now):
+                if(matched_event_status_td.text.find('Find tickets') != -1):
                     print('Found matched event', event_datetime, event_name, event_venue)
                     while(True):
                         try:
-                            matched_event_status_button.click()
+                            matched_event_status_td.click()
                             finished_choosing_events = True
                             break
                         except Exception as e:
@@ -129,23 +135,52 @@ def choose_event(driver):
             if(finished_choosing_events):
                 break
 
+def credit_card_verification(driver, card_six='00000'):
+    def enter_credit_card():
+        credit_six_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='checkCode']")))
+        confirm_button = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "button[type='submit']")))
+        while(True):
+            if(credit_six_input.get_attribute("value") != card_six):
+                credit_six_input.clear()
+                credit_six_input.send_keys(card_six)
+            while(True):
+                try:
+                    confirm_button.click()
+                    break
+                except:
+                    pass
+            try:
+                WebDriverWait(driver, 1).until(EC.alert_is_present()).accept()
+            except:
+                break
+    def go_back():
+        driver.back()
+
+    if(WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "li[class='active']"))).text == 'Verification'):
+        go_back()
+        return True
+    else:
+        return False
+
+
 
 def choose_section(driver):
-    #-------------------choose section-------------------
+    # -------------------choose section-------------------
+    
     if(WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "li[class='active']"))).text == 'Seat Selection'):
         section_li_lst = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[class='zone area-list'] > ul > li")))
         found_matched_section = False
         while(not found_matched_section):
-            for priority_keyword in wanted_section_keywords_priority:
+            for priority_keyword in args.wanted_section_keywords_priority:
                 print('Searching with keywords:', *priority_keyword)
                 for li in section_li_lst:
                     section_match = True
                     section_info_price = li.text
-                    for kw in priority_keyword:
-                        if(section_info_price.find(kw) == -1):
+                    for wanted_kw in priority_keyword:
+                        if(section_info_price.find(wanted_kw) == -1):
                             section_match = False
                             break
-                    for unwanted_kw in unwanted_section_keywords:
+                    for unwanted_kw in args.unwanted_section_keywords:
                         if(section_info_price.find(unwanted_kw) != -1):
                             section_match = False
                             break
@@ -157,38 +192,37 @@ def choose_section(driver):
                                 found_matched_section = True
                                 break
                             except Exception as e:
-                                continue
-                                
+                                continue              
                     if(found_matched_section):
                         break
                 if(found_matched_section):
                     break
                 print('Cannot find available sections with keywords', *priority_keyword)
 
-
-
 def enter_captcha(driver):
     def guess_captcha(driver, n=[3, 4, 2]):
         ocr = ddddocr.DdddOcr(show_ad=False)
         while(True):
-            captcha = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "img[id='TicketForm_verifyCode-image']")))
-            with open('captcha.png', 'wb') as f:
-                f.write(captcha.screenshot_as_png)
-            img = cv2.imread('captcha.png', 0)
+            captcha = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img[id='TicketForm_verifyCode-image']")))
+            img = np.array(Image.open(io.BytesIO(captcha.screenshot_as_png)).convert('L'))
+            # with open('captcha.png', 'wb') as f:
+            #     f.write(captcha.screenshot_as_png)
             if(img.shape == (100, 120)):
                 break
         for kernel_size in n:
             img_erode = cv2.erode(img, np.ones((kernel_size, kernel_size), np.uint8))
-            cv2.imwrite('captcha_processed.png', img_erode)
-            with open('captcha_processed.png', 'rb') as f:
-                captcha_img = f.read()
-            guess = ocr.classification(captcha_img)    
+            # cv2.imwrite('captcha_processed.png', img_erode)
+            # with open('captcha_processed.png', 'rb') as f:
+            #     captcha_img = f.read()
+            guess = ocr.classification(Image.fromarray(img_erode))
             if(len(guess) == 4):
                 break
+        if(len(guess) != 4):
+            guess = ocr.classification(Image.fromarray(img))
         return guess
     try:
-        captcha_guess = guess_captcha(driver) +'0'
-        verify_code_box = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input[id='TicketForm_verifyCode']")))
+        captcha_guess = guess_captcha(driver)
+        verify_code_box = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[id='TicketForm_verifyCode']")))
         while(True):
             if(verify_code_box.get_attribute("value") != captcha_guess):
                 verify_code_box.clear()
@@ -200,7 +234,7 @@ def enter_captcha(driver):
 
 def agree_tos(driver):
     try:
-        agree_tos_checkbox = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input[id='TicketForm_agree']")))
+        agree_tos_checkbox = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[id='TicketForm_agree']")))
         while(not agree_tos_checkbox.is_selected()):
             try: 
                 agree_tos_checkbox.click() 
@@ -209,7 +243,7 @@ def agree_tos(driver):
     except Exception as e: 
         print(f'Agree TOS failed with {e}')
 
-def select_quantity(driver, ticket_quantity):
+def select_quantity(driver, ticket_quantity=args.no_of_tickets):
     full_ticket = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "select")))
     possible_quantity = WebDriverWait(full_ticket, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "option")))
     try:
@@ -223,17 +257,15 @@ def select_quantity(driver, ticket_quantity):
     except Exception as e:
         print(f'Select quantity failed with {e}')
 
-
-
 def book_tickets(driver):
-    max_tries = 5
+    max_tries = 1000
     for _ in range(max_tries):
         with ThreadPoolExecutor() as executor:
             tasks = []
             tasks.append(executor.submit(agree_tos, driver))
-            tasks.append(executor.submit(select_quantity, driver, no_of_tickets))
+            tasks.append(executor.submit(select_quantity, driver))
             tasks.append(executor.submit(enter_captcha, driver))
-        submit_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class='btn btn-primary btn-green']")))
+        submit_button = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.CSS_SELECTOR, "button[class='btn btn-primary btn-green']")))
         while(True):
             try:
                 submit_button.click()
@@ -245,14 +277,23 @@ def book_tickets(driver):
         except:
             break
 
+def order_summary(driver):
+    if(WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "li[class='active']"))).text == 'Order Summary'):
+        pass
 
 def main():
-    driver = login_tixcraft()
+    driver = uc.Chrome()
+    login_tixcraft(driver)
+    # verifying = True
+    # while(verifying):
+    #     choose_event(driver)
+    #     verifying = credit_card_verification(driver)
     choose_event(driver)
     choose_section(driver)
     book_tickets(driver)
+    while(True):
+        pass
 
 if __name__ == '__main__':
     main()
-    while(True):
-        pass
+
