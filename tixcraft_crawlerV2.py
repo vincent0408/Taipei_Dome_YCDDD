@@ -91,40 +91,24 @@ def choose_event(driver):
         for event_datetime, event_name, event_venue in args.event_priority:
             print('Now trying', event_datetime, event_name, event_venue)
             matched_event_idx = None
-            matched_event_status_td = None
             event_tr_lst = WebDriverWait(driver, 10).until(EC.visibility_of_all_elements_located((By.CSS_SELECTOR, "tbody > tr")))
-            if(matched_event_idx is None):
-                for i, tr in enumerate(event_tr_lst):
-                    event_td = WebDriverWait(tr, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "td")))
-                    datetime_match, name_match, venue_match = True, True, True
-                    if(event_datetime is not None):
-                        datetime_match = (event_td[0].text == event_datetime)
-                    if(event_name is not None):
-                        name_match = (event_td[1].text == event_name)
-                    if(event_venue is not None):
-                        venue_match = (event_td[2].text == event_venue)
-                    if(datetime_match and name_match and venue_match):
-                        matched_event_idx = i
-                        matched_event_status_td = event_td[-1]
-                        break
-            else:
-                matched_event_status_td = WebDriverWait(event_tr_lst[matched_event_idx], 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "td")))
-            if(matched_event_idx is None):
-                print('No matched events, should abort')
-                driver.refresh()
-                continue
-                # print('No matched events, randomly choosing now')
-                # tbd
-            else:
-                current_status = matched_event_status_td.text
-                if(current_status.find('Sale ended on') != -1):
-                    continue
-                elif(current_status.find('Sale starts at') != -1):
-                    print(current_status, ', refreshing...', sep='')
-                    time.sleep(.5)
-                    driver.refresh()
+            for i, event_tr in enumerate(event_tr_lst):
+                event_td_lst = WebDriverWait(event_tr, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "td")))
+                datetime_match, name_match, venue_match = True, True, True
+                if(event_datetime is not None):
+                    datetime_match = (event_td_lst[0].text == event_datetime)
+                if(event_name is not None):
+                    name_match = (event_td_lst[1].text == event_name)
+                if(event_venue is not None):
+                    venue_match = (event_td_lst[2].text == event_venue)
+                if(datetime_match and name_match and venue_match):
+                    matched_event_idx = i
+                    matched_event_status_td = event_td_lst[-1]
                     break
-                if(matched_event_status_td.text.find('Find tickets') != -1):
+
+            if(matched_event_idx is not None):
+                current_status = matched_event_status_td.text
+                if(current_status.find('Find tickets') != -1):
                     print('Found matched event', event_datetime, event_name, event_venue)
                     while(True):
                         try:
@@ -133,6 +117,17 @@ def choose_event(driver):
                             break
                         except Exception as e:
                             continue
+                elif(current_status.find('Sale starts at') != -1):
+                    print(current_status, ', refreshing...', sep='')
+                    time.sleep(.5)
+                    driver.refresh()
+                    break
+                elif(current_status.find('Sale ended on') != -1):
+                    continue
+            else:
+                print('No matched events, should abort')
+                driver.refresh()
+                continue
             if(finished_choosing_events):
                 break
 
@@ -309,8 +304,8 @@ if __name__ == '__main__':
         main()
     else:
         from apscheduler.schedulers.blocking import BlockingScheduler
-        start_date, start_time = args.start_time.split('T')
-        hour, minute, second = start_time.split(':')
+        import re
+        start_date, hour, minute, second  = re.split('T|:', args.start_time)
         scheduler = BlockingScheduler(timezone='Asia/Taipei')
         scheduler.add_job(main, 'cron', start_date=start_date, hour=hour, minute=minute, second=second)
         scheduler.start()
